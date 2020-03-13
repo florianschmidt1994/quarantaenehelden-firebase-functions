@@ -33,7 +33,10 @@ exports.firestoreRequest = functions.region('europe-west1').firestore.document('
     })
     return await sgMail.send({
       to: receiver,
-      from: email,
+      from: "new-offer@quarantaenehelden.org",
+        replyTo : {
+          email: email
+        },
       templateId: 'd-ed9746e4ff064676b7df121c81037fab',
       dynamic_template_data: {
         subject: 'QuarantäneHelden - Jemand hat dir geschrieben!',
