@@ -3,7 +3,7 @@ const admin = require('firebase-admin');
 admin.initializeApp();
 const sgMail = require('@sendgrid/mail');
 sgMail.setApiKey(
-  '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',
+  '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',
 );
 
 exports.firestoreRequest = functions.region('europe-west1').firestore.document('/ask-for-help/{requestId}/offer-help/{offerId}')
