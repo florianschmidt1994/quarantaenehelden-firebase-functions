@@ -20,6 +20,17 @@ exports.firestoreRequest = functions.region('europe-west1').firestore.document('
     const data = await admin.auth().getUser(uid);
     const { email: receiver } = data.toJSON();
     const { answer, email } = offer.data();
+    console.log({
+      to: receiver,
+      from: email,
+      templateId: 'd-ed9746e4ff064676b7df121c81037fab',
+      dynamic_template_data: {
+        subject: 'QuarantäneHelden - Jemand hat dir geschrieben!',
+        answer,
+        email,
+        request
+      }
+    })
     return await sgMail.send({
       to: receiver,
       from: email,
