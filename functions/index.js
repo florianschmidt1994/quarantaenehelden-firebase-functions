@@ -33,7 +33,7 @@ exports.firestoreRequest = functions.region('europe-west1').firestore.document('
     })
     return await sgMail.send({
       to: receiver,
-      from: "new-offer@quarantaenehelden.org",
+      from: "help@quarantaenehelden.org",
         replyTo : {
           email: email
         },
