@@ -131,3 +131,17 @@ exports.askForHelpCreate = functions.region('europe-west1').firestore.document('
       console.log('ID', snap.id);
     }
   });
+
+
+exports.regionSubscribeCreate = functions.region('europe-west1').firestore.document('/offer-help/{helperId}')
+  .onCreate(async (snap, context) => {
+    try {
+      const db = admin.firestore();
+      await db.collection('/stats').doc('external').update({
+        regionSubscribed: admin.firestore.FieldValue.increment(1),
+      });
+    } catch (e) {
+      console.error(e);
+      console.log('ID', snap.id);
+    }
+  });
