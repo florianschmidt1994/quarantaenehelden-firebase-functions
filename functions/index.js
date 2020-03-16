@@ -17,6 +17,7 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
 
       const offer = await db.collection(parentPath).doc(offerId).get();
       const askRecord = await askForHelp.get();
+      if(!askRecord.exists) console.error('ask-for-help at ', snap.ref.parent.parent.path, 'does not exist');
       const { request, uid } = askRecord.data().d; // TODO check for d
       const data = await admin.auth().getUser(uid);
       const { email: receiver } = data.toJSON();
@@ -47,8 +48,8 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
           request,
         },
       });
-      await db.collection(`/ask-for-help/${askRecord.id}/stats`).doc('external').set({
-        responses: admin.firestore.FieldValue.increment(1),
+      await db.collection(`/ask-for-help`).doc(askRecord.id).update({
+        'd.responses': admin.firestore.FieldValue.increment(1),
       });
       await db.collection('/stats').doc('external').update({
         offerHelp: admin.firestore.FieldValue.increment(1),
