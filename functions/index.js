@@ -62,6 +62,12 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
 
 exports.askForHelpCreate = functions.region('europe-west1').firestore.document('/ask-for-help/{requestId}')
   .onCreate(async (snap, context) => {
+    const MAX_RESULTS = 30;
+
+    const dist = (search, doc) => {
+      return Math.abs(Number(search) -  Number(doc.plz))
+    };
+
     try {
       const MAPS_ENABLED = false;
       const parentPath = snap.ref.parent.path; // get the id
@@ -83,21 +89,32 @@ exports.askForHelpCreate = functions.region('europe-west1').firestore.document('
         if (!askForHelpSnapData || !askForHelpSnapData.d || !askForHelpSnapData.d.plz) {
           console.warn('Failed to find plz for ask-for-help ', askForHelpSnapData);
         } else {
-          const start = askForHelpSnapData.d.plz.slice(0, -3) + '000';
-          const end = askForHelpSnapData.d.plz.slice(0, -3) + '999';
+          const search = askForHelpSnapData.d.plz;
+          const start = search.slice(0, -3) + '000';
+          const end = search.slice(0, -3) + '999';
           const results = await offersRef.orderBy('d.plz').startAt(start).endAt(end).get();
-          queryResult = results.docs.map(doc => ({ id: doc.id, ...doc.data().d }));
+          const allPossibleOffers = results.docs.map(doc => ({ id: doc.id, ...doc.data().d})).filter(({ plz }) => plz.length === search.length);
+          const sortedOffers = allPossibleOffers.map(doc => ({...doc, distance: dist(search, doc)})).sort((doc1 , doc2) => {
+            return doc1.distance - doc2.distance;
+          });
+          if(sortedOffers.length > MAX_RESULTS) {
+            const lastEntry = sortedOffers[MAX_RESULTS];
+            queryResult = sortedOffers.filter(doc => doc.distance <= lastEntry.distance);
+          } else {
+            queryResult = sortedOffers;
+          }
         }
       }
+
       let offersToContact = [];
-      if (queryResult.length > 30) {
+      if (queryResult.length > MAX_RESULTS) {
         for (let i = queryResult.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * i);
           const temp = queryResult[i];
           queryResult[i] = queryResult[j];
           queryResult[j] = temp;
         }
-        offersToContact = queryResult.slice(0, 30);
+        offersToContact = queryResult.slice(0, MAX_RESULTS);
       } else {
         offersToContact = queryResult;
       }
