@@ -17,7 +17,7 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
 
       const offer = await db.collection(parentPath).doc(offerId).get();
       const askRecord = await askForHelp.get();
-      if(!askRecord.exists) console.error('ask-for-help at ', snap.ref.parent.parent.path, 'does not exist');
+      if (!askRecord.exists) console.error('ask-for-help at ', snap.ref.parent.parent.path, 'does not exist');
       const { request, uid } = askRecord.data().d; // TODO check for d
       const data = await admin.auth().getUser(uid);
       const { email: receiver } = data.toJSON();
@@ -34,20 +34,29 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
           request,
         },
       });
-      await sgMail.send({
-        to: receiver,
-        from: 'help@quarantaenehelden.org',
-        replyTo: {
-          email: email,
-        },
-        templateId: 'd-ed9746e4ff064676b7df121c81037fab',
-        dynamic_template_data: {
-          subject: 'QuarantäneHelden - Jemand hat dir geschrieben!',
-          answer,
-          email,
-          request,
-        },
-      });
+      try {
+        await sgMail.send({
+          to: receiver,
+          from: 'help@quarantaenehelden.org',
+          replyTo: {
+            email: email,
+          },
+          templateId: 'd-ed9746e4ff064676b7df121c81037fab',
+          dynamic_template_data: {
+            subject: 'QuarantäneHelden - Jemand hat dir geschrieben!',
+            answer,
+            email,
+            request,
+          },
+          hideWarnings: true // removes triple bracket warning
+        });
+      } catch (err) {
+        console.warn(err);
+        if (err.response && err.response.body && err.response.body.errors) {
+          console.warn(err.response.body.errors);
+        }
+      }
+
       await db.collection(`/ask-for-help`).doc(askRecord.id).update({
         'd.responses': admin.firestore.FieldValue.increment(1),
       });
@@ -65,7 +74,7 @@ exports.askForHelpCreate = functions.region('europe-west1').firestore.document('
     const MAX_RESULTS = 30;
 
     const dist = (search, doc) => {
-      return Math.abs(Number(search) -  Number(doc.plz))
+      return Math.abs(Number(search) - Number(doc.plz));
     };
 
     try {
@@ -93,11 +102,11 @@ exports.askForHelpCreate = functions.region('europe-west1').firestore.document('
           const start = search.slice(0, -3) + '000';
           const end = search.slice(0, -3) + '999';
           const results = await offersRef.orderBy('d.plz').startAt(start).endAt(end).get();
-          const allPossibleOffers = results.docs.map(doc => ({ id: doc.id, ...doc.data().d})).filter(({ plz }) => plz.length === search.length);
-          const sortedOffers = allPossibleOffers.map(doc => ({...doc, distance: dist(search, doc)})).sort((doc1 , doc2) => {
+          const allPossibleOffers = results.docs.map(doc => ({ id: doc.id, ...doc.data().d })).filter(({ plz }) => plz.length === search.length);
+          const sortedOffers = allPossibleOffers.map(doc => ({ ...doc, distance: dist(search, doc) })).sort((doc1, doc2) => {
             return doc1.distance - doc2.distance;
           });
-          if(sortedOffers.length > MAX_RESULTS) {
+          if (sortedOffers.length > MAX_RESULTS) {
             const lastEntry = sortedOffers[MAX_RESULTS];
             queryResult = sortedOffers.filter(doc => doc.distance <= lastEntry.distance);
           } else {
@@ -134,9 +143,13 @@ exports.askForHelpCreate = functions.region('europe-west1').firestore.document('
               location: askForHelpSnapData.d.location,
               link: 'https://www.quarantaenehelden.org/#/offer-help/' + askForHelpId,
             },
+            hideWarnings: true // removes triple bracket warning
           });
         } catch (err) {
           console.warn(err);
+          if (err.response && err.response.body && err.response.body.errors) {
+            console.warn(err.response.body.errors);
+          }
         }
       }));
 
@@ -148,7 +161,6 @@ exports.askForHelpCreate = functions.region('europe-west1').firestore.document('
       console.log('ID', snap.id);
     }
   });
-
 
 exports.regionSubscribeCreate = functions.region('europe-west1').firestore.document('/offer-help/{helperId}')
   .onCreate(async (snap, context) => {
