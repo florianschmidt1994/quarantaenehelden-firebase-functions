@@ -18,7 +18,10 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
 
       const offer = await db.collection(parentPath).doc(offerId).get();
       const askRecord = await askForHelp.get();
-      if (!askRecord.exists) console.error('ask-for-help at ', snap.ref.parent.parent.path, 'does not exist');
+      if (!askRecord.exists)  {
+        console.error('ask-for-help at ', snap.ref.parent.parent.path, 'does not exist');
+        return;
+      }
       const { request, uid } = askRecord.data().d; // TODO check for d
       const data = await admin.auth().getUser(uid);
       const { email: receiver } = data.toJSON();
