@@ -173,6 +173,7 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 5 minutes').on
       const askForHelpSnapData = askForHelpSnap.data();
       const askForHelpId = askForHelpSnap.id;
       const eligibleHelpOffers = await getEligibleHelpOffers(askForHelpSnapData);
+      console.log("askForHelpId", askForHelpId);
       console.log(eligibleHelpOffers);
       // await sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
     }
