@@ -3,9 +3,7 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 admin.initializeApp();
 const sgMail = require('@sendgrid/mail');
-sgMail.setApiKey(
-  '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',
-);
+sgMail.setApiKey(functions.config().sendgrid.key);
 const { GeoCollectionReference } = require('geofirestore');
 
 const MAX_RESULTS = 30;

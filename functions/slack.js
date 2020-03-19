@@ -1,9 +1,10 @@
 const axios = require('axios');
+const functions = require('firebase-functions');
 
 exports.postToSlack = function postToSlack(snapId, snapData) {
     axios({
         method: 'POST',
-        url: 'https://hooks.slack.com/services/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',
+        url: functions.config().slack.url,
         headers: {
             'Content-type': 'application/json'
         },
