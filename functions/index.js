@@ -78,7 +78,7 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
     }
   });
 
-exports.sendNotificationEmails = functions.pubsub.schedule('every 1 minutes').onRun(async (context) => {
+exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').onRun(async (context) => {
   const dist = (search, doc) => {
     return Math.abs(Number(search) - Number(doc.plz));
   };
@@ -129,8 +129,8 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 1 minutes').on
     return offersToContact;
   };
 
-  const sendNotificationEmails = (eligibleHelpOffers, askForHelpSnapData, askForHelpId) => {
-    Promise.all(eligibleHelpOffers.map(async offerDoc => {
+  const sendNotificationEmails = async (eligibleHelpOffers, askForHelpSnapData, askForHelpId) => {
+    const result = await Promise.all(eligibleHelpOffers.map(async offerDoc => {
       try {
         const { uid } = offerDoc;
         const offeringUser = await admin.auth().getUser(uid);
@@ -152,21 +152,26 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 1 minutes').on
           'd.notificationCounter': admin.firestore.FieldValue.increment(1),
           'd.notificationReceiver': admin.firestore.FieldValue.arrayUnion(uid)
         });
+        return {askForHelpId, email}
       } catch (err) {
         console.warn(err);
         if (err.response && err.response.body && err.response.body.errors) {
           console.warn(err.response.body.errors);
         }
+        return null;
       }
     }));
+    console.log(result);
   };
 
   try {
     const askForHelpSnaps = await db.collection('ask-for-help')
       .where('d.timestamp', '<=', Date.now() - MINIMUM_NOTIFICATION_DELAY * 60 * 1000)
       .where('d.notificationCounter', '==', 0)
+      .limit(3)
       .get();
 
+    console.log("askForHelp Requests to execute", askForHelpSnaps.docs.length);
     // RUN SYNC
     for (let i = 0; i < askForHelpSnaps.docs.length; i++) {
       const askForHelpSnap = askForHelpSnaps.docs[i];
@@ -174,7 +179,7 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 1 minutes').on
       const askForHelpId = askForHelpSnap.id;
       const eligibleHelpOffers = await getEligibleHelpOffers(askForHelpSnapData);
       console.log("askForHelpId", askForHelpId);
-      console.log(eligibleHelpOffers);
+      console.log("eligibleHelpOffers", eligibleHelpOffers.length);
       // await sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
     }
 
@@ -192,6 +197,11 @@ exports.askForHelpCreate = functions.region('europe-west1').firestore.document('
       const parentPath = snap.ref.parent.path; // get the id
       const askForHelpSnap = await db.collection(parentPath).doc(askForHelpId).get();
       const askForHelpSnapData = askForHelpSnap.data();
+
+      // Enforce field to 0
+      await snap.ref.update({
+        'd.notificationCounter': 0
+      });
 
       await db.collection('/stats').doc('external').update({
         askForHelp: admin.firestore.FieldValue.increment(1),
