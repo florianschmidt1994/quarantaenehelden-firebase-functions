@@ -78,7 +78,7 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
     }
   });
 
-exports.sendNotificationEmails = functions.pubsub.schedule('every 5 minutes').onRun(async (context) => {
+exports.sendNotificationEmails = functions.pubsub.schedule('every 1 minutes').onRun(async (context) => {
   const dist = (search, doc) => {
     return Math.abs(Number(search) - Number(doc.plz));
   };
