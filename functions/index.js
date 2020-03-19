@@ -180,7 +180,7 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
       const eligibleHelpOffers = await getEligibleHelpOffers(askForHelpSnapData);
       console.log("askForHelpId", askForHelpId);
       console.log("eligibleHelpOffers", eligibleHelpOffers.length);
-      // await sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
+      await sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
     }
 
   } catch (e) {
