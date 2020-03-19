@@ -168,8 +168,8 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 5 minutes').on
       .get();
 
     // RUN SYNC
-    for (let i = 0; i < askForHelpSnaps.length; i++) {
-      const askForHelpSnap = askForHelpSnaps[i];
+    for (let i = 0; i < askForHelpSnaps.docs.length; i++) {
+      const askForHelpSnap = askForHelpSnaps.docs[i];
       const askForHelpSnapData = askForHelpSnap.data();
       const askForHelpId = askForHelpSnap.id;
       const eligibleHelpOffers = await getEligibleHelpOffers(askForHelpSnapData);
