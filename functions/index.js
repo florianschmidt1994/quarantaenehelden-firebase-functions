@@ -231,10 +231,10 @@ exports.regionSubscribeCreate = functions.region('europe-west1').firestore.docum
     try {
       const db = admin.firestore();
       const snapValue = snap.val();
-      const { postId, uid } = snapValue;
+      const { askForHelpId, uid } = snapValue;
 
       // https://cloud.google.com/firestore/docs/manage-data/add-data#update_elements_in_an_array
-      await db.collection('/ask-for-help').doc(postId).update({
+      await db.collection('/ask-for-help').doc(askForHelpId).update({
         reportedBy: admin.firestore.FieldValue.arrayUnion(uid)
       });
     } catch (e) {
