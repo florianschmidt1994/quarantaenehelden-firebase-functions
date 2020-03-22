@@ -225,3 +225,21 @@ exports.regionSubscribeCreate = functions.region('europe-west1').firestore.docum
       console.log('ID', snap.id);
     }
   });
+
+  exports.reportedPostsCreate = functions.region('europe-west1').firestore.document('/reported-posts/{reportRequestId}')
+  .onCreate(async (snap, context) => {
+    try {
+
+      const db = admin.firestore();
+      const snapValue = snap.val();
+      const { postId, uid } = snapValue;
+
+      // https://cloud.google.com/firestore/docs/manage-data/add-data#update_elements_in_an_array
+      await db.collection('/ask-for-help').doc(postId).update({
+        reportedBy: admin.firestore.FieldValue.arrayUnion(uid)
+      });
+    } catch (e) {
+      console.error(e);
+      console.log('ID', snap.id);
+    }
+  });
