@@ -3,13 +3,18 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 admin.initializeApp();
 const sgMail = require('@sendgrid/mail');
-sgMail.setApiKey(functions.config().sendgrid.key);
 const { GeoCollectionReference } = require('geofirestore');
+
+const envVariables = functions.config()
+const sgMailApiKey = envVariables && envVariables.sendgrid && envVariables.sendgrid.key
+  ? envVariables.sendgrid.key
+  : undefined
+sgMail.setApiKey(sgMailApiKey);
 
 const MAX_RESULTS = 30;
 const MAPS_ENABLED = false;
 const MINIMUM_NOTIFICATION_DELAY = 20;
-
+const SEND_EMAILS = sgMailApiKey !== null && sgMailApiKey !== undefined;
 
 exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/ask-for-help/{requestId}/offer-help/{offerId}')
   .onCreate(async (snap, context) => {
@@ -42,21 +47,23 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
         },
       });
       try {
-        await sgMail.send({
-          to: receiver,
-          from: 'help@quarantaenehelden.org',
-          replyTo: {
-            email: email,
-          },
-          templateId: 'd-ed9746e4ff064676b7df121c81037fab',
-          dynamic_template_data: {
-            subject: 'QuarantäneHelden - Jemand hat dir geschrieben!',
-            answer,
-            email,
-            request,
-          },
-          hideWarnings: true, // removes triple bracket warning
-        });
+        if (SEND_EMAILS) {
+          await sgMail.send({
+            to: receiver,
+            from: 'help@quarantaenehelden.org',
+            replyTo: {
+              email: email,
+            },
+            templateId: 'd-ed9746e4ff064676b7df121c81037fab',
+            dynamic_template_data: {
+              subject: 'QuarantäneHelden - Jemand hat dir geschrieben!',
+              answer,
+              email,
+              request,
+            },
+            hideWarnings: true, // removes triple bracket warning
+          });
+        }
       } catch (err) {
         console.warn(err);
         if (err.response && err.response.body && err.response.body.errors) {
@@ -76,116 +83,121 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
     }
   });
 
-exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').onRun(async (context) => {
-  const dist = (search, doc) => {
-    return Math.abs(Number(search) - Number(doc.plz));
-  };
+if (SEND_EMAILS) {
+  exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').onRun(async (context) => {
+    const dist = (search, doc) => {
+      return Math.abs(Number(search) - Number(doc.plz));
+    };
 
-  const db = admin.firestore();
+    const db = admin.firestore();
 
-  const getEligibleHelpOffers = async (askForHelpSnapData) => {
-    let queryResult = [];
-    if (MAPS_ENABLED) {
-      const offersRef = new GeoCollectionReference(db.collection('offer-help'));
-      const query = offersRef.near({ center: askForHelpSnapData.coordinates, radius: 30 });
-      queryResult = (await query.get()).docs.map(doc => doc.data());
+    const getEligibleHelpOffers = async (askForHelpSnapData) => {
+      let queryResult = [];
+      if (MAPS_ENABLED) {
+        const offersRef = new GeoCollectionReference(db.collection('offer-help'));
+        const query = offersRef.near({ center: askForHelpSnapData.coordinates, radius: 30 });
+        queryResult = (await query.get()).docs.map(doc => doc.data());
 
-    } else {
-      const offersRef = db.collection('offer-help');
-      if (!askForHelpSnapData || !askForHelpSnapData.d || !askForHelpSnapData.d.plz) {
-        console.warn('Failed to find plz for ask-for-help ', askForHelpSnapData);
       } else {
-        const search = askForHelpSnapData.d.plz;
-        const start = search.slice(0, -3) + '000';
-        const end = search.slice(0, -3) + '999';
-        const results = await offersRef.orderBy('d.plz').startAt(start).endAt(end).get();
-        const allPossibleOffers = results.docs.map(doc => ({ id: doc.id, ...doc.data().d })).filter(({ plz }) => plz.length === search.length);
-        const sortedOffers = allPossibleOffers.map(doc => ({ ...doc, distance: dist(search, doc) })).sort((doc1, doc2) => {
-          return doc1.distance - doc2.distance;
-        });
-        if (sortedOffers.length > MAX_RESULTS) {
-          const lastEntry = sortedOffers[MAX_RESULTS];
-          queryResult = sortedOffers.filter(doc => doc.distance <= lastEntry.distance);
+        const offersRef = db.collection('offer-help');
+        if (!askForHelpSnapData || !askForHelpSnapData.d || !askForHelpSnapData.d.plz) {
+          console.warn('Failed to find plz for ask-for-help ', askForHelpSnapData);
         } else {
-          queryResult = sortedOffers;
+          const search = askForHelpSnapData.d.plz;
+          const start = search.slice(0, -3) + '000';
+          const end = search.slice(0, -3) + '999';
+          const results = await offersRef.orderBy('d.plz').startAt(start).endAt(end).get();
+          const allPossibleOffers = results.docs.map(doc => ({ id: doc.id, ...doc.data().d })).filter(({ plz }) => plz.length === search.length);
+          const sortedOffers = allPossibleOffers.map(doc => ({ ...doc, distance: dist(search, doc) })).sort((doc1, doc2) => {
+            return doc1.distance - doc2.distance;
+          });
+          if (sortedOffers.length > MAX_RESULTS) {
+            const lastEntry = sortedOffers[MAX_RESULTS];
+            queryResult = sortedOffers.filter(doc => doc.distance <= lastEntry.distance);
+          } else {
+            queryResult = sortedOffers;
+          }
         }
       }
-    }
 
-    let offersToContact = [];
-    if (queryResult.length > MAX_RESULTS) {
-      for (let i = queryResult.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * i);
-        const temp = queryResult[i];
-        queryResult[i] = queryResult[j];
-        queryResult[j] = temp;
-      }
-      offersToContact = queryResult.slice(0, MAX_RESULTS);
-    } else {
-      offersToContact = queryResult;
-    }
-    return offersToContact;
-  };
-
-  const sendNotificationEmails = async (eligibleHelpOffers, askForHelpSnapData, askForHelpId) => {
-    const result = await Promise.all(eligibleHelpOffers.map(async offerDoc => {
-      try {
-        const { uid } = offerDoc;
-        const offeringUser = await admin.auth().getUser(uid);
-        const { email } = offeringUser.toJSON();
-        await sgMail.send({
-          to: email,
-          from: 'help@quarantaenehelden.org',
-          templateId: 'd-9e0d0ec8eda04c9a98e6cb1edffdac71',
-          dynamic_template_data: {
-            subject: 'QuarantäneHelden - Jemand braucht deine Hilfe!',
-            request: askForHelpSnapData.d.request,
-            location: askForHelpSnapData.d.location,
-            link: 'https://www.quarantaenehelden.org/#/offer-help/' + askForHelpId,
-          },
-          hideWarnings: true, // removes triple bracket warning
-        });
-
-        await db.collection(`/ask-for-help`).doc(askForHelpId).update({
-          'd.notificationCounter': admin.firestore.FieldValue.increment(1),
-          'd.notificationReceiver': admin.firestore.FieldValue.arrayUnion(uid)
-        });
-        return {askForHelpId, email}
-      } catch (err) {
-        console.warn(err);
-        if (err.response && err.response.body && err.response.body.errors) {
-          console.warn(err.response.body.errors);
+      let offersToContact = [];
+      if (queryResult.length > MAX_RESULTS) {
+        for (let i = queryResult.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * i);
+          const temp = queryResult[i];
+          queryResult[i] = queryResult[j];
+          queryResult[j] = temp;
         }
-        return null;
+        offersToContact = queryResult.slice(0, MAX_RESULTS);
+      } else {
+        offersToContact = queryResult;
       }
-    }));
-    console.log(result);
-  };
+      return offersToContact;
+    };
 
-  try {
-    const askForHelpSnaps = await db.collection('ask-for-help')
-      .where('d.timestamp', '<=', Date.now() - MINIMUM_NOTIFICATION_DELAY * 60 * 1000)
-      .where('d.notificationCounter', '==', 0)
-      .limit(3)
-      .get();
+    const sendNotificationEmails = async (eligibleHelpOffers, askForHelpSnapData, askForHelpId) => {
+      const result = await Promise.all(eligibleHelpOffers.map(async offerDoc => {
+        try {
+          const { uid } = offerDoc;
+          const offeringUser = await admin.auth().getUser(uid);
+          const { email } = offeringUser.toJSON();
 
-    console.log("askForHelp Requests to execute", askForHelpSnaps.docs.length);
-    // RUN SYNC
-    for (let i = 0; i < askForHelpSnaps.docs.length; i++) {
-      const askForHelpSnap = askForHelpSnaps.docs[i];
-      const askForHelpSnapData = askForHelpSnap.data();
-      const askForHelpId = askForHelpSnap.id;
-      const eligibleHelpOffers = await getEligibleHelpOffers(askForHelpSnapData);
-      console.log("askForHelpId", askForHelpId);
-      console.log("eligibleHelpOffers", eligibleHelpOffers.length);
-      await sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
+          if (SEND_EMAILS) {
+            await sgMail.send({
+              to: email,
+              from: 'help@quarantaenehelden.org',
+              templateId: 'd-9e0d0ec8eda04c9a98e6cb1edffdac71',
+              dynamic_template_data: {
+                subject: 'QuarantäneHelden - Jemand braucht deine Hilfe!',
+                request: askForHelpSnapData.d.request,
+                location: askForHelpSnapData.d.location,
+                link: 'https://www.quarantaenehelden.org/#/offer-help/' + askForHelpId,
+              },
+              hideWarnings: true, // removes triple bracket warning
+            });
+          }
+
+          await db.collection(`/ask-for-help`).doc(askForHelpId).update({
+            'd.notificationCounter': admin.firestore.FieldValue.increment(1),
+            'd.notificationReceiver': admin.firestore.FieldValue.arrayUnion(uid)
+          });
+          return { askForHelpId, email }
+        } catch (err) {
+          console.warn(err);
+          if (err.response && err.response.body && err.response.body.errors) {
+            console.warn(err.response.body.errors);
+          }
+          return null;
+        }
+      }));
+      console.log(result);
+    };
+
+    try {
+      const askForHelpSnaps = await db.collection('ask-for-help')
+        .where('d.timestamp', '<=', Date.now() - MINIMUM_NOTIFICATION_DELAY * 60 * 1000)
+        .where('d.notificationCounter', '==', 0)
+        .limit(3)
+        .get();
+
+      console.log("askForHelp Requests to execute", askForHelpSnaps.docs.length);
+      // RUN SYNC
+      for (let i = 0; i < askForHelpSnaps.docs.length; i++) {
+        const askForHelpSnap = askForHelpSnaps.docs[i];
+        const askForHelpSnapData = askForHelpSnap.data();
+        const askForHelpId = askForHelpSnap.id;
+        const eligibleHelpOffers = await getEligibleHelpOffers(askForHelpSnapData);
+        console.log("askForHelpId", askForHelpId);
+        console.log("eligibleHelpOffers", eligibleHelpOffers.length);
+        await sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
+      }
+
+    } catch (e) {
+      console.error(e);
     }
 
-  } catch (e) {
-    console.error(e);
-  }
-
-});
+  });
+}
 
 exports.askForHelpCreate = functions.region('europe-west1').firestore.document('/ask-for-help/{requestId}')
   .onCreate(async (snap, context) => {
@@ -226,16 +238,16 @@ exports.regionSubscribeCreate = functions.region('europe-west1').firestore.docum
     }
   });
 
-  exports.reportedPostsCreate = functions.region('europe-west1').firestore.document('/reported-posts/{reportRequestId}')
+exports.reportedPostsCreate = functions.region('europe-west1').firestore.document('/reported-posts/{reportRequestId}')
   .onCreate(async (snap, context) => {
     try {
       const db = admin.firestore();
-      const snapValue = snap.val();
+      const snapValue = snap.data();
       const { askForHelpId, uid } = snapValue;
 
       // https://cloud.google.com/firestore/docs/manage-data/add-data#update_elements_in_an_array
       await db.collection('/ask-for-help').doc(askForHelpId).update({
-        reportedBy: admin.firestore.FieldValue.arrayUnion(uid)
+        ['d.reportedBy']: admin.firestore.FieldValue.arrayUnion(uid)
       });
     } catch (e) {
       console.error(e);
