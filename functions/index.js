@@ -229,7 +229,6 @@ exports.regionSubscribeCreate = functions.region('europe-west1').firestore.docum
   exports.reportedPostsCreate = functions.region('europe-west1').firestore.document('/reported-posts/{reportRequestId}')
   .onCreate(async (snap, context) => {
     try {
-
       const db = admin.firestore();
       const snapValue = snap.val();
       const { postId, uid } = snapValue;
