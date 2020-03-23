@@ -87,120 +87,120 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
     }
   });
 
-exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').onRun(async (context) => {
-  const dist = (search, doc) => {
-    return Math.abs(Number(search) - Number(doc.plz));
-  };
+  exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').onRun(async (context) => {
+    const dist = (search, doc) => {
+      return Math.abs(Number(search) - Number(doc.plz));
+    };
 
-  const db = admin.firestore();
+    const db = admin.firestore();
 
-  const getEligibleHelpOffers = async (askForHelpSnapData) => {
-    let queryResult = [];
-    if (MAPS_ENABLED) {
-      const offersRef = new GeoCollectionReference(db.collection('offer-help'));
-      const query = offersRef.near({ center: askForHelpSnapData.coordinates, radius: 30 });
-      queryResult = (await query.get()).docs.map(doc => doc.data());
+    const getEligibleHelpOffers = async (askForHelpSnapData) => {
+      let queryResult = [];
+      if (MAPS_ENABLED) {
+        const offersRef = new GeoCollectionReference(db.collection('offer-help'));
+        const query = offersRef.near({ center: askForHelpSnapData.coordinates, radius: 30 });
+        queryResult = (await query.get()).docs.map(doc => doc.data());
 
-    } else {
-      const offersRef = db.collection('offer-help');
-      if (!askForHelpSnapData || !askForHelpSnapData.d || !askForHelpSnapData.d.plz) {
-        console.warn('Failed to find plz for ask-for-help ', askForHelpSnapData);
       } else {
-        const search = askForHelpSnapData.d.plz;
-        const start = search.slice(0, -3) + '000';
-        const end = search.slice(0, -3) + '999';
-        const results = await offersRef.orderBy('d.plz').startAt(start).endAt(end).get();
-        const allPossibleOffers = results.docs.map(doc => ({ id: doc.id, ...doc.data().d })).filter(({ plz }) => plz.length === search.length);
-        const sortedOffers = allPossibleOffers.map(doc => ({ ...doc, distance: dist(search, doc) })).sort((doc1, doc2) => {
-          return doc1.distance - doc2.distance;
-        });
-        if (sortedOffers.length > MAX_RESULTS) {
-          const lastEntry = sortedOffers[MAX_RESULTS];
-          queryResult = sortedOffers.filter(doc => doc.distance <= lastEntry.distance);
+        const offersRef = db.collection('offer-help');
+        if (!askForHelpSnapData || !askForHelpSnapData.d || !askForHelpSnapData.d.plz) {
+          console.warn('Failed to find plz for ask-for-help ', askForHelpSnapData);
         } else {
-          queryResult = sortedOffers;
+          const search = askForHelpSnapData.d.plz;
+          const start = search.slice(0, -3) + '000';
+          const end = search.slice(0, -3) + '999';
+          const results = await offersRef.orderBy('d.plz').startAt(start).endAt(end).get();
+          const allPossibleOffers = results.docs.map(doc => ({ id: doc.id, ...doc.data().d })).filter(({ plz }) => plz.length === search.length);
+          const sortedOffers = allPossibleOffers.map(doc => ({ ...doc, distance: dist(search, doc) })).sort((doc1, doc2) => {
+            return doc1.distance - doc2.distance;
+          });
+          if (sortedOffers.length > MAX_RESULTS) {
+            const lastEntry = sortedOffers[MAX_RESULTS];
+            queryResult = sortedOffers.filter(doc => doc.distance <= lastEntry.distance);
+          } else {
+            queryResult = sortedOffers;
+          }
         }
       }
-    }
 
-    let offersToContact = [];
-    if (queryResult.length > MAX_RESULTS) {
-      for (let i = queryResult.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * i);
-        const temp = queryResult[i];
-        queryResult[i] = queryResult[j];
-        queryResult[j] = temp;
-      }
-      offersToContact = queryResult.slice(0, MAX_RESULTS);
-    } else {
-      offersToContact = queryResult;
-    }
-    return offersToContact;
-  };
-
-  const sendNotificationEmails = async (eligibleHelpOffers, askForHelpSnapData, askForHelpId) => {
-    const result = await Promise.all(eligibleHelpOffers.map(async offerDoc => {
-      try {
-        const { uid } = offerDoc;
-        const offeringUser = await admin.auth().getUser(uid);
-        const { email } = offeringUser.toJSON();
-        await sgMail.send({
-          to: email,
-          from: 'help@quarantaenehelden.org',
-          templateId: 'd-9e0d0ec8eda04c9a98e6cb1edffdac71',
-          dynamic_template_data: {
-            subject: 'QuarantäneHelden - Jemand braucht deine Hilfe!',
-            request: askForHelpSnapData.d.request,
-            location: askForHelpSnapData.d.location,
-            link: 'https://www.quarantaenehelden.org/#/offer-help/' + askForHelpId,
-          },
-          hideWarnings: true, // removes triple bracket warning
-        });
-
-        await db.collection(`/ask-for-help`).doc(askForHelpId).update({
-          'd.notificationCounter': admin.firestore.FieldValue.increment(1),
-          'd.notificationReceiver': admin.firestore.FieldValue.arrayUnion(uid)
-        });
-        return {askForHelpId, email}
-      } catch (err) {
-        console.warn(err);
-        if (err.response && err.response.body && err.response.body.errors) {
-          console.warn(err.response.body.errors);
+      let offersToContact = [];
+      if (queryResult.length > MAX_RESULTS) {
+        for (let i = queryResult.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * i);
+          const temp = queryResult[i];
+          queryResult[i] = queryResult[j];
+          queryResult[j] = temp;
         }
-        return null;
+        offersToContact = queryResult.slice(0, MAX_RESULTS);
+      } else {
+        offersToContact = queryResult;
       }
-    }));
-    console.log(result);
-  };
+      return offersToContact;
+    };
 
-  try {
-    const askForHelpSnaps = await db.collection('ask-for-help')
-      .where('d.timestamp', '<=', Date.now() - MINIMUM_NOTIFICATION_DELAY * 60 * 1000)
-      .where('d.notificationCounter', '==', 0)
-      .limit(3)
-      .get();
+    const sendNotificationEmails = async (eligibleHelpOffers, askForHelpSnapData, askForHelpId) => {
+      const result = await Promise.all(eligibleHelpOffers.map(async offerDoc => {
+        try {
+          const { uid } = offerDoc;
+          const offeringUser = await admin.auth().getUser(uid);
+          const { email } = offeringUser.toJSON();
 
-    console.log("askForHelp Requests to execute", askForHelpSnaps.docs.length);
-    // RUN SYNC
-    for (let i = 0; i < askForHelpSnaps.docs.length; i++) {
-      const askForHelpSnap = askForHelpSnaps.docs[i];
-      const askForHelpSnapData = askForHelpSnap.data();
-      const askForHelpId = askForHelpSnap.id;
-      const eligibleHelpOffers = await getEligibleHelpOffers(askForHelpSnapData);
-      console.log("askForHelpId", askForHelpId);
-      console.log("eligibleHelpOffers", eligibleHelpOffers.length);
+          await sgMail.send({
+            to: email,
+            from: 'help@quarantaenehelden.org',
+            templateId: 'd-9e0d0ec8eda04c9a98e6cb1edffdac71',
+            dynamic_template_data: {
+              subject: 'QuarantäneHelden - Jemand braucht deine Hilfe!',
+              request: askForHelpSnapData.d.request,
+              location: askForHelpSnapData.d.location,
+              link: 'https://www.quarantaenehelden.org/#/offer-help/' + askForHelpId,
+            },
+            hideWarnings: true, // removes triple bracket warning
+          });
+
+          await db.collection(`/ask-for-help`).doc(askForHelpId).update({
+            'd.notificationCounter': admin.firestore.FieldValue.increment(1),
+            'd.notificationReceiver': admin.firestore.FieldValue.arrayUnion(uid)
+          });
+          return { askForHelpId, email }
+        } catch (err) {
+          console.warn(err);
+          if (err.response && err.response.body && err.response.body.errors) {
+            console.warn(err.response.body.errors);
+          }
+          return null;
+        }
+      }));
+      console.log(result);
+    };
+
+    try {
+      const askForHelpSnaps = await db.collection('ask-for-help')
+        .where('d.timestamp', '<=', Date.now() - MINIMUM_NOTIFICATION_DELAY * 60 * 1000)
+        .where('d.notificationCounter', '==', 0)
+        .limit(3)
+        .get();
+
+      console.log("askForHelp Requests to execute", askForHelpSnaps.docs.length);
+      // RUN SYNC
+      for (let i = 0; i < askForHelpSnaps.docs.length; i++) {
+        const askForHelpSnap = askForHelpSnaps.docs[i];
+        const askForHelpSnapData = askForHelpSnap.data();
+        const askForHelpId = askForHelpSnap.id;
+        const eligibleHelpOffers = await getEligibleHelpOffers(askForHelpSnapData);
+        console.log("askForHelpId", askForHelpId);
+        console.log("eligibleHelpOffers", eligibleHelpOffers.length);
         if (SEND_EMAILS) {
           await sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
         } else {
           console.log(sendingMailsDisabledLogMessage)
         }
       }
+    } catch (e) {
+      console.error(e);
+    }
 
-  } catch (e) {
-    console.error(e);
-  }
-
-});
+  });
 
 exports.askForHelpCreate = functions.region('europe-west1').firestore.document('/ask-for-help/{requestId}')
   .onCreate(async (snap, context) => {
