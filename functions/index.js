@@ -8,13 +8,13 @@ const { GeoCollectionReference } = require('geofirestore');
 const envVariables = functions.config()
 const sgMailApiKey = envVariables && envVariables.sendgrid && envVariables.sendgrid.key
    ? envVariables.sendgrid.key
-   : undefined
+   : null
 sgMail.setApiKey(sgMailApiKey);
 
 const MAX_RESULTS = 30;
 const MAPS_ENABLED = false;
 const MINIMUM_NOTIFICATION_DELAY = 20;
-const SEND_EMAILS = sgMailApiKey !== null && sgMailApiKey !== undefined;
+const SEND_EMAILS = sgMailApiKey !== null;
 const sendingMailsDisabledLogMessage = 'Sending emails is currently disabled.'
 
 exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/ask-for-help/{requestId}/offer-help/{offerId}')
@@ -249,7 +249,7 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
 
        // https://cloud.google.com/firestore/docs/manage-data/add-data#update_elements_in_an_array
       await db.collection('/ask-for-help').doc(askForHelpId).update({
-        ['d.reportedBy']: admin.firestore.FieldValue.arrayUnion(uid)
+        'd.reportedBy': admin.firestore.FieldValue.arrayUnion(uid)
       });
     } catch (e) {
       console.error(e);
