@@ -3,13 +3,19 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 admin.initializeApp();
 const sgMail = require('@sendgrid/mail');
-sgMail.setApiKey(functions.config().sendgrid.key);
 const { GeoCollectionReference } = require('geofirestore');
+
+const envVariables = functions.config()
+const sgMailApiKey = envVariables && envVariables.sendgrid && envVariables.sendgrid.key
+   ? envVariables.sendgrid.key
+   : undefined
+sgMail.setApiKey(sgMailApiKey);
 
 const MAX_RESULTS = 30;
 const MAPS_ENABLED = false;
 const MINIMUM_NOTIFICATION_DELAY = 20;
-
+const SEND_EMAILS = sgMailApiKey !== null && sgMailApiKey !== undefined;
+const sendingMailsDisabledLogMessage = 'Sending emails is currently disabled.'
 
 exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/ask-for-help/{requestId}/offer-help/{offerId}')
   .onCreate(async (snap, context) => {
@@ -42,21 +48,25 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
         },
       });
       try {
-        await sgMail.send({
-          to: receiver,
-          from: 'help@quarantaenehelden.org',
-          replyTo: {
-            email: email,
-          },
-          templateId: 'd-ed9746e4ff064676b7df121c81037fab',
-          dynamic_template_data: {
-            subject: 'QuarantäneHelden - Jemand hat dir geschrieben!',
-            answer,
-            email,
-            request,
-          },
-          hideWarnings: true, // removes triple bracket warning
-        });
+        if (SEND_EMAILS) {
+          await sgMail.send({
+            to: receiver,
+            from: 'help@quarantaenehelden.org',
+            replyTo: {
+              email: email,
+            },
+            templateId: 'd-ed9746e4ff064676b7df121c81037fab',
+            dynamic_template_data: {
+              subject: 'QuarantäneHelden - Jemand hat dir geschrieben!',
+              answer,
+              email,
+              request,
+            },
+            hideWarnings: true, // removes triple bracket warning
+          });
+        } else {
+          console.log(sendingMailsDisabledLogMessage);
+        }
       } catch (err) {
         console.warn(err);
         if (err.response && err.response.body && err.response.body.errors) {
@@ -178,7 +188,11 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
       const eligibleHelpOffers = await getEligibleHelpOffers(askForHelpSnapData);
       console.log("askForHelpId", askForHelpId);
       console.log("eligibleHelpOffers", eligibleHelpOffers.length);
-      await sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
+      if (SEND_EMAILS) {
+        await sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
+      } else {
+        console.log(sendingMailsDisabledLogMessage);
+      }
     }
 
   } catch (e) {
@@ -219,6 +233,23 @@ exports.regionSubscribeCreate = functions.region('europe-west1').firestore.docum
       const db = admin.firestore();
       await db.collection('/stats').doc('external').update({
         regionSubscribed: admin.firestore.FieldValue.increment(1),
+      });
+    } catch (e) {
+      console.error(e);
+      console.log('ID', snap.id);
+    }
+  });
+
+exports.reportedPostsCreate = functions.region('europe-west1').firestore.document('/reported-posts/{reportRequestId}')
+  .onCreate(async (snap, context) => {
+    try {
+      const db = admin.firestore();
+      const snapValue = snap.data();
+      const { askForHelpId, uid } = snapValue;
+
+       // https://cloud.google.com/firestore/docs/manage-data/add-data#update_elements_in_an_array
+      await db.collection('/ask-for-help').doc(askForHelpId).update({
+        ['d.reportedBy']: admin.firestore.FieldValue.arrayUnion(uid)
       });
     } catch (e) {
       console.error(e);
