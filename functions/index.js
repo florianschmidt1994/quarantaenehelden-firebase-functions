@@ -262,10 +262,10 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
     try {
       const db = admin.firestore();
       const snapValue = snap.data();
-      const { askForHelpId, uid:uidFromDeleteRequest } = snapValue;
+      const { askForHelpId, uid } = snapValue;
       const askForHelpCollectionEntry = await db.collection('/ask-for-help').doc(askForHelpId).get();
       const { uid:userIdFromCollectionEntry } = askForHelpCollectionEntry;
-      if (uidFromDeleteRequest === userIdFromCollectionEntry) await db.collection('/ask-for-help').doc(askForHelpId).delete();
+      if (uid === userIdFromCollectionEntry) await db.collection('/ask-for-help').doc(askForHelpId).delete();
     } catch (e) {
       console.error(e);
       console.log('ID', snap.id);
