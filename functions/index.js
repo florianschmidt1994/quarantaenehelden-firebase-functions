@@ -256,3 +256,19 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
       console.log('ID', snap.id);
     }
   });
+
+  exports.solvedPostsCreate = functions.region('europe-west1').firestore.document('/solved-posts/{reportRequestId}')
+  .onCreate(async (snap, context) => {
+    try {
+      const db = admin.firestore();
+      const snapValue = snap.data();
+      const { askForHelpId, uid } = snapValue;
+      const askForHelpSnap = await db.collection('/ask-for-help').doc(askForHelpId).get();
+      const askForHelpSnapData = askForHelpSnap.data();
+      const { uid:userIdFromAskForHelpEntry } = askForHelpSnapData;
+      if (uid === userIdFromAskForHelpEntry) await db.collection('/ask-for-help').doc(askForHelpId).delete();
+    } catch (e) {
+      console.error(e);
+      console.log('ID', snap.id);
+    }
+  });
