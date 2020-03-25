@@ -280,12 +280,19 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
     try {
       const db = admin.firestore();
       const snapValue = snap.data();
-      const { uid, collectionName, askForHelpId } = snapValue; // collectionName can be either "ask-for-help" or "solved-posts"
+      // collectionName can be either "ask-for-help" or "solved-posts"
+      const { uid, collectionName } = snapValue;
 
-      if (!userIdsMatch(db, collectionName, askForHelpId, uid)) return;
+      if (!userIdsMatch(db, collectionName, snap.id, uid)) return;
 
-      await migrateResponses(db, collectionName, askForHelpId, 'deleted');
-      await db.collection(collectionName).doc(askForHelpId).delete();
+      await migrateResponses(db, collectionName, snap.id, 'deleted');
+      // recursive delete to remove the subcollection (responses) as well
+      // https://stackoverflow.com/a/57623425
+      await db.collection(collectionName).doc(snap.id).delete({
+        project: process.env.GCLOUD_PROJECT,
+        recursive: true,
+        yes: true,
+      });
     } catch (e) {
       console.error(e);
       console.log('ID', snap.id);
