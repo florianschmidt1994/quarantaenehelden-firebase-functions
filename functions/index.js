@@ -267,7 +267,7 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
 
       if (!userIdsMatch(db, askForHelpCollectionName, snap.id, uid)) return;
 
-      await migrateResponses(askForHelpCollectionName, snap.id, 'solved-posts');
+      await migrateResponses(db, askForHelpCollectionName, snap.id, 'solved-posts');
       await db.collection(askForHelpCollectionName).doc(snap.id).delete();
     } catch (e) {
       console.error(e);
@@ -280,12 +280,12 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
     try {
       const db = admin.firestore();
       const snapValue = snap.data();
-      const { uid, collectionName } = snapValue; // collectionName can be either "ask-for-help" or "solved-posts"
+      const { uid, collectionName, askForHelpId } = snapValue; // collectionName can be either "ask-for-help" or "solved-posts"
 
-      if (!userIdsMatch(db, collectionName, snap.id, uid)) return;
+      if (!userIdsMatch(db, collectionName, askForHelpId, uid)) return;
 
-      await migrateResponses(collectionName, snap.id, 'deleted');
-      await db.collection(collectionName).doc(snap.id).delete();
+      await migrateResponses(db, collectionName, askForHelpId, 'deleted');
+      await db.collection(collectionName).doc(askForHelpId).delete();
     } catch (e) {
       console.error(e);
       console.log('ID', snap.id);
