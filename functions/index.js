@@ -261,14 +261,49 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
   .onCreate(async (snap, context) => {
     try {
       const db = admin.firestore();
+      const askForHelpCollectionName = 'ask-for-help'
       const snapValue = snap.data();
       const { uid } = snapValue;
-      const askForHelpSnap = await db.collection('/ask-for-help').doc(snap.id).get();
+      const askForHelpSnap = await db.collection(askForHelpCollectionName).doc(snap.id).get();
       const askForHelpSnapData = askForHelpSnap.data();
       const { uid:userIdFromAskForHelpEntry } = askForHelpSnapData;
-      if (uid === userIdFromAskForHelpEntry) await db.collection('/ask-for-help').doc(snap.id).delete();
+
+      if (uid !== userIdFromAskForHelpEntry) return;
+
+      await migrateResponses(askForHelpCollectionName, snap.id, 'solved-posts');
+      await db.collection(askForHelpCollectionName).doc(snap.id).delete();
     } catch (e) {
       console.error(e);
       console.log('ID', snap.id);
     }
   });
+
+  exports.solvedPostsCreate = functions.region('europe-west1').firestore.document('/deleted/{reportRequestId}')
+  .onCreate(async (snap, context) => {
+    try {
+      const db = admin.firestore();
+      const snapValue = snap.data();
+      const { uid, collectionName } = snapValue; // collectionName can be either "ask-for-help" or "solved-posts"
+      const askForHelpSnap = await db.collection(collectionName).doc(snap.id).get();
+      const askForHelpSnapData = askForHelpSnap.data();
+      const { uid:userIdFromAskForHelpEntry } = askForHelpSnapData;
+
+      if (uid !== userIdFromAskForHelpEntry) return;
+
+      await migrateResponses(collectionName, snap.id, 'deleted');
+      await db.collection(collectionName).doc(snap.id).delete();
+    } catch (e) {
+      console.error(e);
+      console.log('ID', snap.id);
+    }
+  });
+
+  async function migrateResponses(db, collectionToMigrateFrom, requestForHelpId, collectionToMigrateTo) {
+    const responsesSnap = db.collection(collectionToMigrateFrom).doc(requestForHelpId).collection('offer-help').get();
+    const responses = responsesSnap.docs.map((docSnapshot) => ({ ...docSnapshot.data(), id: docSnapshot.id }));
+
+    const batch = fb.store.batch();
+    const subCollection = db.collection(collectionToMigrateTo).doc(requestForHelpId).collection('offer-help');
+    responses.map((response) => batch.set(subCollection.doc(response.id), response));
+    await batch.commit();
+  }
