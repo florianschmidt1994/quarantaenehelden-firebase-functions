@@ -300,10 +300,10 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
   }
 
   async function migrateResponses(db, collectionToMigrateFrom, documentId, collectionToMigrateTo) {
-    const responsesSnap = db.collection(collectionToMigrateFrom).doc(documentId).collection('offer-help').get();
+    const responsesSnap = await db.collection(collectionToMigrateFrom).doc(documentId).collection('offer-help').get();
     const responses = responsesSnap.docs.map((docSnapshot) => ({ ...docSnapshot.data(), id: docSnapshot.id }));
 
-    const batch = fb.store.batch();
+    const batch = db.batch();
     const subCollection = db.collection(collectionToMigrateTo).doc(documentId).collection('offer-help');
     responses.map((response) => batch.set(subCollection.doc(response.id), response));
     await batch.commit();
