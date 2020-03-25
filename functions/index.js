@@ -261,14 +261,11 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
   .onCreate(async (snap, context) => {
     try {
       const db = admin.firestore();
-      const askForHelpCollectionName = 'ask-for-help';
       const snapValue = snap.data();
       const { uid } = snapValue;
-      const askForHelpSnap = await db.collection(askForHelpCollectionName).doc(snap.id).get();
-      const askForHelpSnapData = askForHelpSnap.data();
-      const { uid:userIdFromAskForHelpEntry } = askForHelpSnapData;
+      const askForHelpCollectionName = 'ask-for-help';
 
-      if (uid !== userIdFromAskForHelpEntry) return;
+      if (!userIdsMatch(db, askForHelpCollectionName, uid)) return;
 
       await migrateResponses(askForHelpCollectionName, snap.id, 'solved-posts');
       await db.collection(askForHelpCollectionName).doc(snap.id).delete();
@@ -284,11 +281,8 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
       const db = admin.firestore();
       const snapValue = snap.data();
       const { uid, collectionName } = snapValue; // collectionName can be either "ask-for-help" or "solved-posts"
-      const askForHelpSnap = await db.collection(collectionName).doc(snap.id).get();
-      const askForHelpSnapData = askForHelpSnap.data();
-      const { uid:userIdFromAskForHelpEntry } = askForHelpSnapData;
 
-      if (uid !== userIdFromAskForHelpEntry) return;
+      if (!userIdsMatch(db,collectionName, uid)) return;
 
       await migrateResponses(collectionName, snap.id, 'deleted');
       await db.collection(collectionName).doc(snap.id).delete();
@@ -297,6 +291,13 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
       console.log('ID', snap.id);
     }
   });
+
+  async function userIdsMatch(db, collectionName, uidFromRequest) {
+    const docSnap = await db.collection(collectionName).doc(snap.id).get();
+    const docSnapData = docSnap.data();
+    const { uid } = docSnapData;
+    return uid === uidFromRequest;
+  }
 
   async function migrateResponses(db, collectionToMigrateFrom, requestForHelpId, collectionToMigrateTo) {
     const responsesSnap = db.collection(collectionToMigrateFrom).doc(requestForHelpId).collection('offer-help').get();
