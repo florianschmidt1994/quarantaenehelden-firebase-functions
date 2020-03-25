@@ -278,7 +278,7 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
     }
   });
 
-  exports.solvedPostsCreate = functions.region('europe-west1').firestore.document('/deleted/{reportRequestId}')
+  exports.deletedCreate = functions.region('europe-west1').firestore.document('/deleted/{reportRequestId}')
   .onCreate(async (snap, context) => {
     try {
       const db = admin.firestore();
