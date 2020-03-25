@@ -261,7 +261,7 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
   .onCreate(async (snap, context) => {
     try {
       const db = admin.firestore();
-      const askForHelpCollectionName = 'ask-for-help'
+      const askForHelpCollectionName = 'ask-for-help';
       const snapValue = snap.data();
       const { uid } = snapValue;
       const askForHelpSnap = await db.collection(askForHelpCollectionName).doc(snap.id).get();
