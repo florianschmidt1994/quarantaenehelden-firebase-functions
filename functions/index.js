@@ -5,10 +5,10 @@ admin.initializeApp();
 const sgMail = require('@sendgrid/mail');
 const { GeoCollectionReference } = require('geofirestore');
 
-const envVariables = functions.config()
+const envVariables = functions.config();
 const sgMailApiKey = envVariables && envVariables.sendgrid && envVariables.sendgrid.key
-   ? envVariables.sendgrid.key
-   : null
+  ? envVariables.sendgrid.key
+  : null
 sgMail.setApiKey(sgMailApiKey);
 
 const MAX_RESULTS = 30;
@@ -160,7 +160,7 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
           'd.notificationCounter': admin.firestore.FieldValue.increment(1),
           'd.notificationReceiver': admin.firestore.FieldValue.arrayUnion(uid)
         });
-        return {askForHelpId, email}
+        return { askForHelpId, email }
       } catch (err) {
         console.warn(err);
         if (err.response && err.response.body && err.response.body.errors) {
@@ -247,7 +247,7 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
       const snapValue = snap.data();
       const { askForHelpId, uid } = snapValue;
 
-       // https://cloud.google.com/firestore/docs/manage-data/add-data#update_elements_in_an_array
+      // https://cloud.google.com/firestore/docs/manage-data/add-data#update_elements_in_an_array
       await db.collection('/ask-for-help').doc(askForHelpId).update({
         'd.reportedBy': admin.firestore.FieldValue.arrayUnion(uid)
       });
@@ -257,7 +257,7 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
     }
   });
 
-  exports.solvedPostsCreate = functions.region('europe-west1').firestore.document('/solved-posts/{reportRequestId}')
+exports.solvedPostsCreate = functions.region('europe-west1').firestore.document('/solved-posts/{reportRequestId}')
   .onCreate(async (snap, context) => {
     try {
       const db = admin.firestore();
@@ -268,14 +268,14 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
       if (!userIdsMatch(db, askForHelpCollectionName, snap.id, uid)) return;
 
       await migrateResponses(db, askForHelpCollectionName, snap.id, 'solved-posts');
-      await deleteDocumentWithSubCollection(db, askForHelpCollectionName, snap.id);
+      await deleteDocumentWithSubCollections(db, askForHelpCollectionName, snap.id);
     } catch (e) {
       console.error(e);
       console.log('ID', snap.id);
     }
   });
 
-  exports.deletedCreate = functions.region('europe-west1').firestore.document('/deleted/{reportRequestId}')
+exports.deletedCreate = functions.region('europe-west1').firestore.document('/deleted/{reportRequestId}')
   .onCreate(async (snap, context) => {
     try {
       const db = admin.firestore();
@@ -286,36 +286,80 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
       if (!userIdsMatch(db, collectionName, snap.id, uid)) return;
 
       await migrateResponses(db, collectionName, snap.id, 'deleted');
-      await deleteDocumentWithSubCollection(db, collectionName, snap.id);
+      await deleteDocumentWithSubCollections(db, collectionName, snap.id);
     } catch (e) {
       console.error(e);
       console.log('ID', snap.id);
     }
   });
 
-  async function userIdsMatch(db, collectionName, documentId, uidFromRequest) {
-    const docSnap = await db.collection(collectionName).doc(documentId).get();
-    const docSnapData = docSnap.data();
-    const { uid } = docSnapData;
-    return uid === uidFromRequest;
-  }
+async function userIdsMatch(db, collectionName, documentId, uidFromRequest) {
+  const docSnap = await db.collection(collectionName).doc(documentId).get();
+  const docSnapData = docSnap.data();
+  const { uid } = docSnapData;
+  return uid === uidFromRequest;
+}
 
-  async function migrateResponses(db, collectionToMigrateFrom, documentId, collectionToMigrateTo) {
-    const responsesSnap = await db.collection(collectionToMigrateFrom).doc(documentId).collection('offer-help').get();
-    const responses = responsesSnap.docs.map((docSnapshot) => ({ ...docSnapshot.data(), id: docSnapshot.id }));
+async function migrateResponses(db, collectionToMigrateFrom, documentId, collectionToMigrateTo) {
+  const responsesSnap = await db.collection(collectionToMigrateFrom).doc(documentId).collection('offer-help').get();
+  const responses = responsesSnap.docs.map((docSnapshot) => ({ ...docSnapshot.data(), id: docSnapshot.id }));
 
-    const batch = db.batch();
-    const subCollection = db.collection(collectionToMigrateTo).doc(documentId).collection('offer-help');
-    responses.map((response) => batch.set(subCollection.doc(response.id), response));
-    await batch.commit();
-  }
+  const batch = db.batch();
+  const subCollection = db.collection(collectionToMigrateTo).doc(documentId).collection('offer-help');
+  responses.map((response) => batch.set(subCollection.doc(response.id), response));
+  await batch.commit();
+}
 
-  async function deleteDocumentWithSubCollection(db, collectionName, documentId) {
-    // recursive delete to remove the sub collection (e.g. responses) as well
-      // https://stackoverflow.com/a/57623425
-      await db.collection(collectionName).doc(documentId).delete({
-        project: process.env.GCLOUD_PROJECT,
-        recursive: true,
-        yes: true,
+async function deleteDocumentWithSubCollections(db, collectionName, documentId) {
+  // delete document from collection
+  await db.collection(collectionName).doc(documentId).delete();
+  // recursive delete to remove the sub collections (e.g. responses) as well
+  const collectionPath = `${collectionName}/${documentId}/offer-help`;
+  const batchSize = 50;
+  return deleteCollection(db, collectionPath, batchSize)
+}
+
+// db-admins API does not support recursive deletion yet, which is necessary to delete subcollections of a document
+// https://github.com/firebase/firebase-admin-node/issues/361
+async function deleteCollection(db, collectionPath, batchSize) {
+  // code taken from https://firebase.google.com/docs/firestore/manage-data/delete-data#collections
+  let collectionRef = db.collection(collectionPath);
+  let query = collectionRef.orderBy('__name__').limit(batchSize);
+
+  return new Promise((resolve, reject) => {
+    deleteQueryBatch(db, query, resolve, reject);
+  });
+}
+
+async function deleteQueryBatch(db, query, resolve, reject) {
+  // code taken from https://firebase.google.com/docs/firestore/manage-data/delete-data#collections
+  return query.get()
+    .then((snapshot) => {
+      // When there are no documents left, we are done
+      if (snapshot.size === 0) {
+        return 0;
+      }
+
+      // Delete documents in a batch
+      let batch = db.batch();
+      snapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
       });
-  }
+
+      return batch.commit().then(() => {
+        return snapshot.size;
+      });
+    }).then((numDeleted) => {
+      if (numDeleted === 0) {
+        resolve();
+        return;
+      }
+
+      // Recurse on the next process tick, to avoid
+      // exploding the stack.
+      process.nextTick(() => {
+        deleteQueryBatch(db, query, resolve, reject);
+      });
+    })
+    .catch(reject);
+}
