@@ -268,7 +268,7 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
       if (!userIdsMatch(db, askForHelpCollectionName, snap.id, uid)) return;
 
       await migrateResponses(db, askForHelpCollectionName, snap.id, 'solved-posts');
-      await db.collection(askForHelpCollectionName).doc(snap.id).delete();
+      await deleteDocumentWithSubCollection(db, askForHelpCollectionName, snap.id);
     } catch (e) {
       console.error(e);
       console.log('ID', snap.id);
@@ -286,13 +286,7 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
       if (!userIdsMatch(db, collectionName, snap.id, uid)) return;
 
       await migrateResponses(db, collectionName, snap.id, 'deleted');
-      // recursive delete to remove the subcollection (responses) as well
-      // https://stackoverflow.com/a/57623425
-      await db.collection(collectionName).doc(snap.id).delete({
-        project: process.env.GCLOUD_PROJECT,
-        recursive: true,
-        yes: true,
-      });
+      await deleteDocumentWithSubCollection(db, collectionName, snap.id);
     } catch (e) {
       console.error(e);
       console.log('ID', snap.id);
@@ -314,4 +308,14 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
     const subCollection = db.collection(collectionToMigrateTo).doc(documentId).collection('offer-help');
     responses.map((response) => batch.set(subCollection.doc(response.id), response));
     await batch.commit();
+  }
+
+  async function deleteDocumentWithSubCollection(db, collectionName, documentId) {
+    // recursive delete to remove the sub collection (e.g. responses) as well
+      // https://stackoverflow.com/a/57623425
+      await db.collection(collectionName).doc(documentId).delete({
+        project: process.env.GCLOUD_PROJECT,
+        recursive: true,
+        yes: true,
+      });
   }
