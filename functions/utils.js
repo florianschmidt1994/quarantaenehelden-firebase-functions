@@ -47,9 +47,9 @@ async function deleteQueryBatch(db, query, resolve, reject) {
           process.nextTick(() => {
             deleteQueryBatch(db, query, resolve, reject);
           });
-        })
-        .catch(reject);
-    });
+        });
+    })
+    .catch(reject);
 }
 
 async function deleteCollection(db, collectionPath, batchSize) {
