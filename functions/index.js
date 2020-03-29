@@ -3,6 +3,7 @@ const admin = require('firebase-admin');
 const sgMail = require('@sendgrid/mail');
 const { GeoCollectionReference } = require('geofirestore');
 const slack = require('./slack');
+const { userIdsMatch, migrateResponses, deleteDocumentWithSubCollections } = require('./utils');
 
 admin.initializeApp();
 const envVariables = functions.config();
@@ -10,7 +11,6 @@ const envVariables = functions.config();
 const sgMailApiKey = envVariables && envVariables.sendgrid && envVariables.sendgrid.key
   ? envVariables.sendgrid.key
   : null;
-
 sgMail.setApiKey(sgMailApiKey);
 
 const MAX_RESULTS = 30;
@@ -30,6 +30,7 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
       const offer = await db.collection(parentPath).doc(offerId).get();
       const askRecord = await askForHelp.get();
       if (!askRecord.exists) {
+        // eslint-disable-next-line no-console
         console.error('ask-for-help at ', snap.ref.parent.parent.path, 'does not exist');
         return;
       }
@@ -38,6 +39,7 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
       const { email: receiver } = data.toJSON();
       const { answer, email } = offer.data();
 
+      // eslint-disable-next-line no-console
       console.log({
         to: receiver,
         from: email,
@@ -67,11 +69,14 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
             hideWarnings: true, // removes triple bracket warning
           });
         } else {
+          // eslint-disable-next-line no-console
           console.log(sendingMailsDisabledLogMessage);
         }
       } catch (err) {
+        // eslint-disable-next-line no-console
         console.warn(err);
         if (err.response && err.response.body && err.response.body.errors) {
+          // eslint-disable-next-line no-console
           console.warn(err.response.body.errors);
         }
       }
@@ -83,7 +88,9 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
         offerHelp: admin.firestore.FieldValue.increment(1),
       });
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
@@ -102,6 +109,7 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
     } else {
       const offersRef = db.collection('offer-help');
       if (!askForHelpSnapData || !askForHelpSnapData.d || !askForHelpSnapData.d.plz) {
+        // eslint-disable-next-line no-console
         console.warn('Failed to find plz for ask-for-help ', askForHelpSnapData);
       } else {
         const search = askForHelpSnapData.d.plz;
@@ -163,13 +171,16 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
         });
         return { askForHelpId, email };
       } catch (err) {
+        // eslint-disable-next-line no-console
         console.warn(err);
         if (err.response && err.response.body && err.response.body.errors) {
+          // eslint-disable-next-line no-console
           console.warn(err.response.body.errors);
         }
         return null;
       }
     }));
+    // eslint-disable-next-line no-console
     console.log(result);
   };
 
@@ -180,22 +191,26 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
       .limit(3)
       .get();
 
+    // eslint-disable-next-line no-console
     console.log('askForHelp Requests to execute', askForHelpSnaps.docs.length);
     // RUN SYNC
     const asyncOperations = askForHelpSnaps.docs.map(async (askForHelpSnap) => {
       const askForHelpSnapData = askForHelpSnap.data();
       const askForHelpId = askForHelpSnap.id;
       const eligibleHelpOffers = await getEligibleHelpOffers(askForHelpSnapData);
+      // eslint-disable-next-line no-console
       console.log('askForHelpId', askForHelpId);
+      // eslint-disable-next-line no-console
       console.log('eligibleHelpOffers', eligibleHelpOffers.length);
       if (SEND_EMAILS) {
         return sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
-      } else {
-        console.log(sendingMailsDisabledLogMessage);
       }
+      // eslint-disable-next-line no-console
+      return console.log(sendingMailsDisabledLogMessage);
     });
     await Promise.all(asyncOperations);
   } catch (e) {
+    // eslint-disable-next-line no-console
     console.error(e);
   }
 });
@@ -220,7 +235,9 @@ exports.askForHelpCreate = functions.region('europe-west1').firestore.document('
 
       await slack.postToSlack(askForHelpId, askForHelpSnapData);
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
@@ -233,7 +250,9 @@ exports.regionSubscribeCreate = functions.region('europe-west1').firestore.docum
         regionSubscribed: admin.firestore.FieldValue.increment(1),
       });
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
@@ -250,7 +269,9 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
         'd.reportedBy': admin.firestore.FieldValue.arrayUnion(uid),
       });
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
@@ -268,13 +289,15 @@ exports.solvedPostsCreate = functions.region('europe-west1').firestore.document(
       await migrateResponses(db, askForHelpCollectionName, snap.id, 'solved-posts');
       await deleteDocumentWithSubCollections(db, askForHelpCollectionName, snap.id);
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
 
 exports.deletedCreate = functions.region('europe-west1').firestore.document('/deleted/{reportRequestId}')
-  .onCreate(async (snap, context) => {
+  .onCreate(async (snap) => {
     try {
       const db = admin.firestore();
       const snapValue = snap.data();
@@ -286,78 +309,9 @@ exports.deletedCreate = functions.region('europe-west1').firestore.document('/de
       await migrateResponses(db, collectionName, snap.id, 'deleted');
       await deleteDocumentWithSubCollections(db, collectionName, snap.id);
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
-
-async function userIdsMatch(db, collectionName, documentId, uidFromRequest) {
-  const docSnap = await db.collection(collectionName).doc(documentId).get();
-  const docSnapData = docSnap.data();
-  const { uid } = docSnapData;
-  return uid === uidFromRequest;
-}
-
-async function migrateResponses(db, collectionToMigrateFrom, documentId, collectionToMigrateTo) {
-  const responsesSnap = await db.collection(collectionToMigrateFrom).doc(documentId).collection('offer-help').get();
-  const responses = responsesSnap.docs.map((docSnapshot) => ({ ...docSnapshot.data(), id: docSnapshot.id }));
-
-  const batch = db.batch();
-  const subCollection = db.collection(collectionToMigrateTo).doc(documentId).collection('offer-help');
-  responses.map((response) => batch.set(subCollection.doc(response.id), response));
-  await batch.commit();
-}
-
-async function deleteDocumentWithSubCollections(db, collectionName, documentId) {
-  // delete document from collection
-  await db.collection(collectionName).doc(documentId).delete();
-  // recursive delete to remove the sub collections (e.g. responses) as well
-  const collectionPath = `${collectionName}/${documentId}/offer-help`;
-  const batchSize = 50;
-  return deleteCollection(db, collectionPath, batchSize)
-}
-
-// db-admins API does not support recursive deletion yet, which is necessary to delete subcollections of a document
-// https://github.com/firebase/firebase-admin-node/issues/361
-async function deleteCollection(db, collectionPath, batchSize) {
-  // code taken from https://firebase.google.com/docs/firestore/manage-data/delete-data#collections
-  let collectionRef = db.collection(collectionPath);
-  let query = collectionRef.orderBy('__name__').limit(batchSize);
-
-  return new Promise((resolve, reject) => {
-    deleteQueryBatch(db, query, resolve, reject);
-  });
-}
-
-async function deleteQueryBatch(db, query, resolve, reject) {
-  // code taken from https://firebase.google.com/docs/firestore/manage-data/delete-data#collections
-  return query.get()
-    .then((snapshot) => {
-      // When there are no documents left, we are done
-      if (snapshot.size === 0) {
-        return 0;
-      }
-
-      // Delete documents in a batch
-      let batch = db.batch();
-      snapshot.docs.forEach((doc) => {
-        batch.delete(doc.ref);
-      });
-
-      return batch.commit().then(() => {
-        return snapshot.size;
-      });
-    }).then((numDeleted) => {
-      if (numDeleted === 0) {
-        resolve();
-        return;
-      }
-
-      // Recurse on the next process tick, to avoid
-      // exploding the stack.
-      process.nextTick(() => {
-        deleteQueryBatch(db, query, resolve, reject);
-      });
-    })
-    .catch(reject);
-}
