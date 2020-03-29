@@ -1,24 +1,26 @@
-const slack = require('./slack');
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
-admin.initializeApp();
 const sgMail = require('@sendgrid/mail');
 const { GeoCollectionReference } = require('geofirestore');
+const slack = require('./slack');
+const { userIdsMatch, migrateResponses, deleteDocumentWithSubCollections } = require('./utils');
 
+admin.initializeApp();
 const envVariables = functions.config();
+
 const sgMailApiKey = envVariables && envVariables.sendgrid && envVariables.sendgrid.key
   ? envVariables.sendgrid.key
-  : null
+  : null;
 sgMail.setApiKey(sgMailApiKey);
 
 const MAX_RESULTS = 30;
 const MAPS_ENABLED = false;
 const MINIMUM_NOTIFICATION_DELAY = 20;
 const SEND_EMAILS = sgMailApiKey !== null;
-const sendingMailsDisabledLogMessage = 'Sending emails is currently disabled.'
+const sendingMailsDisabledLogMessage = 'Sending emails is currently disabled.';
 
 exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/ask-for-help/{requestId}/offer-help/{offerId}')
-  .onCreate(async (snap, context) => {
+  .onCreate(async (snap) => {
     try {
       const parentPath = snap.ref.parent.path; // get the id
       const offerId = snap.id; // get the id
@@ -28,6 +30,7 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
       const offer = await db.collection(parentPath).doc(offerId).get();
       const askRecord = await askForHelp.get();
       if (!askRecord.exists) {
+        // eslint-disable-next-line no-console
         console.error('ask-for-help at ', snap.ref.parent.parent.path, 'does not exist');
         return;
       }
@@ -36,6 +39,7 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
       const { email: receiver } = data.toJSON();
       const { answer, email } = offer.data();
 
+      // eslint-disable-next-line no-console
       console.log({
         to: receiver,
         from: email,
@@ -53,7 +57,7 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
             to: receiver,
             from: 'help@quarantaenehelden.org',
             replyTo: {
-              email: email,
+              email,
             },
             templateId: 'd-ed9746e4ff064676b7df121c81037fab',
             dynamic_template_data: {
@@ -65,31 +69,34 @@ exports.offerHelpCreate = functions.region('europe-west1').firestore.document('/
             hideWarnings: true, // removes triple bracket warning
           });
         } else {
+          // eslint-disable-next-line no-console
           console.log(sendingMailsDisabledLogMessage);
         }
       } catch (err) {
+        // eslint-disable-next-line no-console
         console.warn(err);
         if (err.response && err.response.body && err.response.body.errors) {
+          // eslint-disable-next-line no-console
           console.warn(err.response.body.errors);
         }
       }
 
-      await db.collection(`/ask-for-help`).doc(askRecord.id).update({
+      await db.collection('/ask-for-help').doc(askRecord.id).update({
         'd.responses': admin.firestore.FieldValue.increment(1),
       });
       await db.collection('/stats').doc('external').update({
         offerHelp: admin.firestore.FieldValue.increment(1),
       });
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
 
-exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').onRun(async (context) => {
-  const dist = (search, doc) => {
-    return Math.abs(Number(search) - Number(doc.plz));
-  };
+exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').onRun(async () => {
+  const dist = (search, doc) => Math.abs(Number(search) - Number(doc.plz));
 
   const db = admin.firestore();
 
@@ -98,24 +105,26 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
     if (MAPS_ENABLED) {
       const offersRef = new GeoCollectionReference(db.collection('offer-help'));
       const query = offersRef.near({ center: askForHelpSnapData.coordinates, radius: 30 });
-      queryResult = (await query.get()).docs.map(doc => doc.data());
-
+      queryResult = (await query.get()).docs.map((doc) => doc.data());
     } else {
       const offersRef = db.collection('offer-help');
       if (!askForHelpSnapData || !askForHelpSnapData.d || !askForHelpSnapData.d.plz) {
+        // eslint-disable-next-line no-console
         console.warn('Failed to find plz for ask-for-help ', askForHelpSnapData);
       } else {
         const search = askForHelpSnapData.d.plz;
-        const start = search.slice(0, -3) + '000';
-        const end = search.slice(0, -3) + '999';
+        const start = `${search.slice(0, -3)}000`;
+        const end = `${search.slice(0, -3)}999`;
         const results = await offersRef.orderBy('d.plz').startAt(start).endAt(end).get();
-        const allPossibleOffers = results.docs.map(doc => ({ id: doc.id, ...doc.data().d })).filter(({ plz }) => plz.length === search.length);
-        const sortedOffers = allPossibleOffers.map(doc => ({ ...doc, distance: dist(search, doc) })).sort((doc1, doc2) => {
-          return doc1.distance - doc2.distance;
-        });
+        const allPossibleOffers = results.docs
+          .map((doc) => ({ id: doc.id, ...doc.data().d }))
+          .filter(({ plz }) => plz.length === search.length);
+        const sortedOffers = allPossibleOffers
+          .map((doc) => ({ ...doc, distance: dist(search, doc) }))
+          .sort((doc1, doc2) => doc1.distance - doc2.distance);
         if (sortedOffers.length > MAX_RESULTS) {
           const lastEntry = sortedOffers[MAX_RESULTS];
-          queryResult = sortedOffers.filter(doc => doc.distance <= lastEntry.distance);
+          queryResult = sortedOffers.filter((doc) => doc.distance <= lastEntry.distance);
         } else {
           queryResult = sortedOffers;
         }
@@ -124,7 +133,7 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
 
     let offersToContact = [];
     if (queryResult.length > MAX_RESULTS) {
-      for (let i = queryResult.length - 1; i > 0; i--) {
+      for (let i = queryResult.length - 1; i > 0; i -= 1) {
         const j = Math.floor(Math.random() * i);
         const temp = queryResult[i];
         queryResult[i] = queryResult[j];
@@ -138,7 +147,7 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
   };
 
   const sendNotificationEmails = async (eligibleHelpOffers, askForHelpSnapData, askForHelpId) => {
-    const result = await Promise.all(eligibleHelpOffers.map(async offerDoc => {
+    const result = await Promise.all(eligibleHelpOffers.map(async (offerDoc) => {
       try {
         const { uid } = offerDoc;
         const offeringUser = await admin.auth().getUser(uid);
@@ -151,24 +160,27 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
             subject: 'QuarantäneHelden - Jemand braucht deine Hilfe!',
             request: askForHelpSnapData.d.request,
             location: askForHelpSnapData.d.location,
-            link: 'https://www.quarantaenehelden.org/#/offer-help/' + askForHelpId,
+            link: `https://www.quarantaenehelden.org/#/offer-help/${askForHelpId}`,
           },
           hideWarnings: true, // removes triple bracket warning
         });
 
-        await db.collection(`/ask-for-help`).doc(askForHelpId).update({
+        await db.collection('/ask-for-help').doc(askForHelpId).update({
           'd.notificationCounter': admin.firestore.FieldValue.increment(1),
-          'd.notificationReceiver': admin.firestore.FieldValue.arrayUnion(uid)
+          'd.notificationReceiver': admin.firestore.FieldValue.arrayUnion(uid),
         });
-        return { askForHelpId, email }
+        return { askForHelpId, email };
       } catch (err) {
+        // eslint-disable-next-line no-console
         console.warn(err);
         if (err.response && err.response.body && err.response.body.errors) {
+          // eslint-disable-next-line no-console
           console.warn(err.response.body.errors);
         }
         return null;
       }
     }));
+    // eslint-disable-next-line no-console
     console.log(result);
   };
 
@@ -179,30 +191,32 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
       .limit(3)
       .get();
 
-    console.log("askForHelp Requests to execute", askForHelpSnaps.docs.length);
+    // eslint-disable-next-line no-console
+    console.log('askForHelp Requests to execute', askForHelpSnaps.docs.length);
     // RUN SYNC
-    for (let i = 0; i < askForHelpSnaps.docs.length; i++) {
-      const askForHelpSnap = askForHelpSnaps.docs[i];
+    const asyncOperations = askForHelpSnaps.docs.map(async (askForHelpSnap) => {
       const askForHelpSnapData = askForHelpSnap.data();
       const askForHelpId = askForHelpSnap.id;
       const eligibleHelpOffers = await getEligibleHelpOffers(askForHelpSnapData);
-      console.log("askForHelpId", askForHelpId);
-      console.log("eligibleHelpOffers", eligibleHelpOffers.length);
+      // eslint-disable-next-line no-console
+      console.log('askForHelpId', askForHelpId);
+      // eslint-disable-next-line no-console
+      console.log('eligibleHelpOffers', eligibleHelpOffers.length);
       if (SEND_EMAILS) {
-        await sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
-      } else {
-        console.log(sendingMailsDisabledLogMessage);
+        return sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
       }
-    }
-
+      // eslint-disable-next-line no-console
+      return console.log(sendingMailsDisabledLogMessage);
+    });
+    await Promise.all(asyncOperations);
   } catch (e) {
+    // eslint-disable-next-line no-console
     console.error(e);
   }
-
 });
 
 exports.askForHelpCreate = functions.region('europe-west1').firestore.document('/ask-for-help/{requestId}')
-  .onCreate(async (snap, context) => {
+  .onCreate(async (snap) => {
     try {
       const db = admin.firestore();
       const askForHelpId = snap.id; // get the id
@@ -212,7 +226,7 @@ exports.askForHelpCreate = functions.region('europe-west1').firestore.document('
 
       // Enforce field to 0
       await snap.ref.update({
-        'd.notificationCounter': 0
+        'd.notificationCounter': 0,
       });
 
       await db.collection('/stats').doc('external').update({
@@ -220,28 +234,31 @@ exports.askForHelpCreate = functions.region('europe-west1').firestore.document('
       });
 
       await slack.postToSlack(askForHelpId, askForHelpSnapData);
-
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
 
 exports.regionSubscribeCreate = functions.region('europe-west1').firestore.document('/offer-help/{helperId}')
-  .onCreate(async (snap, context) => {
+  .onCreate(async (snap) => {
     try {
       const db = admin.firestore();
       await db.collection('/stats').doc('external').update({
         regionSubscribed: admin.firestore.FieldValue.increment(1),
       });
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
 
 exports.reportedPostsCreate = functions.region('europe-west1').firestore.document('/reported-posts/{reportRequestId}')
-  .onCreate(async (snap, context) => {
+  .onCreate(async (snap) => {
     try {
       const db = admin.firestore();
       const snapValue = snap.data();
@@ -249,16 +266,18 @@ exports.reportedPostsCreate = functions.region('europe-west1').firestore.documen
 
       // https://cloud.google.com/firestore/docs/manage-data/add-data#update_elements_in_an_array
       await db.collection('/ask-for-help').doc(askForHelpId).update({
-        'd.reportedBy': admin.firestore.FieldValue.arrayUnion(uid)
+        'd.reportedBy': admin.firestore.FieldValue.arrayUnion(uid),
       });
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
 
 exports.solvedPostsCreate = functions.region('europe-west1').firestore.document('/solved-posts/{reportRequestId}')
-  .onCreate(async (snap, context) => {
+  .onCreate(async (snap) => {
     try {
       const db = admin.firestore();
       const snapValue = snap.data();
@@ -270,13 +289,15 @@ exports.solvedPostsCreate = functions.region('europe-west1').firestore.document(
       await migrateResponses(db, askForHelpCollectionName, snap.id, 'solved-posts');
       await deleteDocumentWithSubCollections(db, askForHelpCollectionName, snap.id);
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
 
 exports.deletedCreate = functions.region('europe-west1').firestore.document('/deleted/{reportRequestId}')
-  .onCreate(async (snap, context) => {
+  .onCreate(async (snap) => {
     try {
       const db = admin.firestore();
       const snapValue = snap.data();
@@ -288,78 +309,9 @@ exports.deletedCreate = functions.region('europe-west1').firestore.document('/de
       await migrateResponses(db, collectionName, snap.id, 'deleted');
       await deleteDocumentWithSubCollections(db, collectionName, snap.id);
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
+      // eslint-disable-next-line no-console
       console.log('ID', snap.id);
     }
   });
-
-async function userIdsMatch(db, collectionName, documentId, uidFromRequest) {
-  const docSnap = await db.collection(collectionName).doc(documentId).get();
-  const docSnapData = docSnap.data();
-  const { uid } = docSnapData;
-  return uid === uidFromRequest;
-}
-
-async function migrateResponses(db, collectionToMigrateFrom, documentId, collectionToMigrateTo) {
-  const responsesSnap = await db.collection(collectionToMigrateFrom).doc(documentId).collection('offer-help').get();
-  const responses = responsesSnap.docs.map((docSnapshot) => ({ ...docSnapshot.data(), id: docSnapshot.id }));
-
-  const batch = db.batch();
-  const subCollection = db.collection(collectionToMigrateTo).doc(documentId).collection('offer-help');
-  responses.map((response) => batch.set(subCollection.doc(response.id), response));
-  await batch.commit();
-}
-
-async function deleteDocumentWithSubCollections(db, collectionName, documentId) {
-  // delete document from collection
-  await db.collection(collectionName).doc(documentId).delete();
-  // recursive delete to remove the sub collections (e.g. responses) as well
-  const collectionPath = `${collectionName}/${documentId}/offer-help`;
-  const batchSize = 50;
-  return deleteCollection(db, collectionPath, batchSize)
-}
-
-// db-admins API does not support recursive deletion yet, which is necessary to delete subcollections of a document
-// https://github.com/firebase/firebase-admin-node/issues/361
-async function deleteCollection(db, collectionPath, batchSize) {
-  // code taken from https://firebase.google.com/docs/firestore/manage-data/delete-data#collections
-  let collectionRef = db.collection(collectionPath);
-  let query = collectionRef.orderBy('__name__').limit(batchSize);
-
-  return new Promise((resolve, reject) => {
-    deleteQueryBatch(db, query, resolve, reject);
-  });
-}
-
-async function deleteQueryBatch(db, query, resolve, reject) {
-  // code taken from https://firebase.google.com/docs/firestore/manage-data/delete-data#collections
-  return query.get()
-    .then((snapshot) => {
-      // When there are no documents left, we are done
-      if (snapshot.size === 0) {
-        return 0;
-      }
-
-      // Delete documents in a batch
-      let batch = db.batch();
-      snapshot.docs.forEach((doc) => {
-        batch.delete(doc.ref);
-      });
-
-      return batch.commit().then(() => {
-        return snapshot.size;
-      });
-    }).then((numDeleted) => {
-      if (numDeleted === 0) {
-        resolve();
-        return;
-      }
-
-      // Recurse on the next process tick, to avoid
-      // exploding the stack.
-      process.nextTick(() => {
-        deleteQueryBatch(db, query, resolve, reject);
-      });
-    })
-    .catch(reject);
-}
