@@ -188,7 +188,7 @@ exports.sendNotificationEmails = functions.pubsub.schedule('every 3 minutes').on
       console.log('askForHelpId', askForHelpId);
       console.log('eligibleHelpOffers', eligibleHelpOffers.length);
       if (SEND_EMAILS) {
-        await sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
+        return sendNotificationEmails(eligibleHelpOffers, askForHelpSnapData, askForHelpId);
       } else {
         console.log(sendingMailsDisabledLogMessage);
       }
